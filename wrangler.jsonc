@@ -4,6 +4,7 @@
 	"account_id": "1044a3131c99356eba069325d3be3788",
 	"compatibility_date": "2026-06-25",
 	"compatibility_flags": ["nodejs_compat"],
+	"routes": [{ "pattern": "drive.southbag.cc", "custom_domain": true }],
 	"vars": {
 		// The public origin this deployment is served from. Must exactly match
 		// the redirect URI registered with Southbag Identity™ (minus /auth/callback).
