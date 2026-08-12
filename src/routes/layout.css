@@ -1,0 +1,313 @@
+/* Southbag Drive™ house style — same family as Southbag Identity™, minus the
+   bank. Every rule here is load-bearing. Do not ask why. */
+
+:root {
+	color: #080808;
+	background: #fafafa;
+}
+
+* {
+	font-family: "Times New Roman", Times, serif;
+	box-sizing: border-box;
+	box-shadow:
+		0 0 10px rgb(0 0 0 / 50%),
+		inset 0 0 5px rgb(255 255 255 / 30%) !important;
+	text-shadow:
+		1px 1px 2px rgb(0 0 0 / 50%),
+		2px 2px 4px rgb(0 0 0 / 30%) !important;
+	filter: blur(0.1px) brightness(1.05) saturate(1.1);
+}
+
+body {
+	margin: 0;
+	min-width: 320px;
+	overflow-x: hidden;
+	background: #fff;
+	font-family: Arial, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+	font: inherit;
+}
+
+button,
+.button-link {
+	display: inline-block;
+	border: 2px outset #ddd;
+	border-radius: 0;
+	background: #eeeeee;
+	color: #000;
+	padding: 0.35rem 0.7rem;
+	text-decoration: none;
+	box-shadow:
+		0 6px 14px rgb(0 0 0 / 25%),
+		inset 0 -2px 5px rgb(0 0 0 / 20%),
+		inset 0 2px 5px rgb(255 255 255 / 50%) !important;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+
+button:hover,
+.button-link:hover {
+	background: #ddd;
+}
+
+button:disabled {
+	color: #777;
+	cursor: default;
+}
+
+input,
+textarea,
+select {
+	width: 100%;
+	border: 2px inset #ddd;
+	background: #fff;
+	color: #000;
+	padding: 0.45rem;
+	box-shadow:
+		0 0 10px rgb(0 0 0 / 50%),
+		inset 0 0 5px rgb(255 255 255 / 30%) !important;
+	transform: skew(-1deg);
+}
+
+a {
+	color: #000;
+	text-decoration: underline;
+}
+
+p {
+	margin: 0.45rem 0;
+}
+
+h1 {
+	margin: 0 0 0.35rem;
+	font-size: clamp(1.9rem, 5vw, 3rem);
+	line-height: 1;
+	transform: rotate(-0.5deg);
+}
+
+h2 {
+	margin: 0 0 0.5rem;
+	font-size: clamp(1.1rem, 3vw, 1.5rem);
+}
+
+/* The logo is stretched the full width of the page, on purpose. */
+.logo-strip {
+	display: block;
+	width: 100%;
+	height: 84px;
+	object-fit: fill;
+	border: 0;
+	background: transparent;
+	filter: blur(0.3px) brightness(1.05) saturate(1.1);
+}
+
+.shell {
+	max-width: 960px;
+	margin: 0 auto;
+	padding: 0 1rem 2rem;
+}
+
+.userbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.5rem 0;
+}
+
+.userbar form {
+	margin: 0;
+}
+
+.content {
+	display: grid;
+	gap: 1.25rem;
+}
+
+.landing {
+	max-width: 620px;
+	margin: 0 auto;
+	padding: 0 1rem 3rem;
+	text-align: center;
+}
+
+.landing .button-row {
+	justify-content: center;
+	margin-top: 1.25rem;
+}
+
+.panel {
+	border: 2px ridge #ddd;
+	background: rgb(255 255 255 / 80%);
+	padding: 0.9rem;
+	box-shadow:
+		0 0 10px rgb(0 0 0 / 50%),
+		inset 0 0 5px rgb(255 255 255 / 30%) !important;
+}
+
+.tiny {
+	font-size: 0.78rem;
+	overflow-wrap: anywhere;
+}
+
+.button-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.6rem;
+	align-items: center;
+}
+
+.btn-large {
+	min-height: 44px;
+	font-size: 20px;
+	padding: 12px 26px;
+}
+
+.field {
+	display: grid;
+	gap: 0.3rem;
+	margin-bottom: 0.7rem;
+}
+
+.field > span {
+	display: inline-block;
+	font-weight: 700;
+	transform: skew(5deg);
+}
+
+/* The meter reports emptiness, not fullness. It fills from the right. */
+.meter {
+	position: relative;
+	height: 32px;
+	border: 2px inset #ddd;
+	background: repeating-linear-gradient(45deg, #f6f6f6, #f6f6f6 8px, #ececec 8px, #ececec 16px);
+}
+
+.meter-fill {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	background: linear-gradient(180deg, #b8ffb8, #57c957);
+	transition: width 0.6s ease-in-out;
+}
+
+.meter-label {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	font-size: 0.8rem;
+}
+
+.progress {
+	position: relative;
+	height: 24px;
+	border: 2px inset #ddd;
+	background: #fff;
+	margin-bottom: 0.7rem;
+}
+
+.progress-fill {
+	position: absolute;
+	top: 0;
+	left: 0;
+	bottom: 0;
+	background: repeating-linear-gradient(90deg, #7c9bff, #7c9bff 12px, #4d6fe8 12px, #4d6fe8 24px);
+}
+
+.progress-label {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	font-size: 0.78rem;
+}
+
+.file-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.file-table th {
+	border: 2px ridge #ccc;
+	background: #ececec;
+	padding: 0.4rem;
+	text-align: right;
+	font-size: 0.85rem;
+}
+
+.file-table td {
+	border: 2px dashed #999;
+	padding: 0.45rem;
+	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+}
+
+.file-table tr:nth-child(odd) td {
+	background: rgb(240 240 255 / 60%);
+}
+
+.operations {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+}
+
+.controls {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 0.75rem;
+	margin-bottom: 0.9rem;
+}
+
+.dialog-stack {
+	position: fixed;
+	inset: auto 1rem 1rem auto;
+	z-index: 20;
+	display: grid;
+	gap: 0.35rem;
+	width: min(320px, calc(100vw - 2rem));
+	pointer-events: none;
+}
+
+.fake-dialog {
+	border: 2px outset #ddd;
+	background: #eee;
+	padding: 0.45rem;
+	font-size: 0.78rem;
+	animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+	from {
+		transform: translateX(-40%);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+footer {
+	margin-top: 1.5rem;
+	padding-top: 0.75rem;
+	border-top: 2px dashed #000;
+}
+
+@media (max-width: 700px) {
+	.controls {
+		grid-template-columns: 1fr;
+	}
+
+	.logo-strip {
+		height: 56px;
+	}
+}

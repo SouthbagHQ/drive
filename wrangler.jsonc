@@ -1,0 +1,32 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "southbag-drive",
+	"account_id": "1044a3131c99356eba069325d3be3788",
+	"compatibility_date": "2026-06-25",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		// The public origin this deployment is served from. Must exactly match
+		// the redirect URI registered with Southbag Identity™ (minus /auth/callback).
+		"ORIGIN": "https://drive.southbag.cc",
+		"IDENTITY_ISSUER": "https://identity.southbag.cc"
+	},
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"assets": {
+		"directory": ".svelte-kit/cloudflare",
+		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "drive",
+			"database_id": "53e1decd-0db0-4d63-a038-2d58ba7c1ac1",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "drive-files"
+		}
+	]
+}

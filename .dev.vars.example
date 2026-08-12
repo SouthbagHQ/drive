@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local development (`vite dev` reads it via the
+# wrangler platform proxy). Values here override the `vars` in wrangler.jsonc.
+
+ORIGIN="http://localhost:5173"
+IDENTITY_ISSUER="https://identity.southbag.cc"
