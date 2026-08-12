@@ -3,8 +3,8 @@ import type { RequestHandler } from './$types';
 import {
 	contentDispositionAttachment,
 	deleteFileRow,
+	fileBody,
 	getFile,
-	purgeObject,
 	renameFile,
 	sanitizeFileName,
 	setShareToken
@@ -19,7 +19,6 @@ export const HEAD: RequestHandler = async ({ params, locals, platform }) => {
 	return new Response(null, { status: file ? 200 : 404 });
 };
 
-// GET — stream the object out of R2 as an attachment.
 export const GET: RequestHandler = async ({ params, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	if (!platform) return json({ error: 'no_platform' }, { status: 500 });
@@ -27,18 +26,14 @@ export const GET: RequestHandler = async ({ params, locals, platform }) => {
 	const file = await getFile(platform.env.DB, locals.user.id, params.id);
 	if (!file) return json({ error: 'not_found' }, { status: 404 });
 
-	const object = await platform.env.BUCKET.get(file.r2_key);
-	if (!object) return json({ error: 'object_missing' }, { status: 404 });
-
-	return new Response(object.body, {
+	return new Response(fileBody(platform.env.DB, file.id, file.size), {
 		headers: {
 			'Content-Type': file.content_type,
-			'Content-Length': String(object.size),
+			'Content-Length': String(file.size),
 			'Content-Disposition': contentDispositionAttachment(file.name),
 			// The content type is attacker-supplied; never let the browser sniff
 			// an uploaded blob into something executable on our origin.
 			'X-Content-Type-Options': 'nosniff',
-			ETag: object.httpEtag,
 			'Cache-Control': 'private, no-store'
 		}
 	});
@@ -63,9 +58,6 @@ export const PATCH: RequestHandler = async ({ params, request, locals, platform 
 	return json({ id: params.id, name });
 };
 
-// DELETE — object first, THEN the row: if the request is cancelled
-// mid-delete the worst case is a row whose object is gone (download 404, quota
-// still charged) — never the abusable inverse where quota frees but bytes stay.
 export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	if (!platform) return json({ error: 'no_platform' }, { status: 500 });
@@ -73,15 +65,6 @@ export const DELETE: RequestHandler = async ({ params, locals, platform }) => {
 	const file = await getFile(platform.env.DB, locals.user.id, params.id);
 	if (!file) return json({ error: 'not_found' }, { status: 404 });
 
-	// Only drop the row once the bytes are really gone: freeing the quota while
-	// the object survives would let a user store more than their 100MB.
-	const purged = await purgeObject(platform, file.r2_key);
-	if (!purged) {
-		return json(
-			{ error: 'delete_failed', message: 'The file could not be deleted. It remains. Try again.' },
-			{ status: 500 }
-		);
-	}
 	await deleteFileRow(platform.env.DB, locals.user.id, params.id);
 	return json({ deleted: true });
 };

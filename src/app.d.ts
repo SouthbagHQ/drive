@@ -11,7 +11,6 @@ declare global {
 		interface Platform {
 			env: {
 				DB: D1Database;
-				BUCKET: R2Bucket;
 				ORIGIN: string;
 				IDENTITY_ISSUER: string;
 			};

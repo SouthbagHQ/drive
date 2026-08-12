@@ -2,18 +2,17 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
 	QUOTA_BYTES,
+	CHUNK_BYTES,
+	deleteFileRow,
 	insertFileIfWithinQuota,
-	purgeObject,
 	sanitizeFileName,
 	storageUsed
 } from '$lib/server/files';
 
-// Uploads are raw-body PUTs streamed straight into R2 — no multipart parsing,
-// so a 100MB file never has to fit in Worker memory.
 export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	if (!platform) return json({ error: 'no_platform' }, { status: 500 });
-	const { DB, BUCKET } = platform.env;
+	const { DB } = platform.env;
 
 	// A truly absent Content-Length can't be metered up front. Number(null) is
 	// 0, which would otherwise sail past the guards, so check the raw header.
@@ -56,55 +55,59 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 		request.headers.get('x-sb-content-type')?.slice(0, 120) || 'application/octet-stream';
 
 	const id = crypto.randomUUID();
-	const r2Key = `u/${locals.user.id}/${id}`;
-
-	// R2 needs a known body length. In the real Workers runtime we pin it with
-	// FixedLengthStream; in local `vite dev` (Node) that global doesn't exist,
-	// so buffer instead — memory is only a concern in production.
-	let payload: ReadableStream | ArrayBuffer;
-	if (request.body && typeof FixedLengthStream === 'function') {
-		const fixed = new FixedLengthStream(declaredLength);
-		void request.body.pipeTo(fixed.writable).catch(() => {});
-		payload = fixed.readable;
-	} else {
-		payload = await request.arrayBuffer();
-	}
-
-	let size: number;
-	try {
-		const object = await BUCKET.put(r2Key, payload, {
-			httpMetadata: { contentType }
-		});
-		if (!object) return json({ error: 'storage_error' }, { status: 500 });
-		size = object.size;
-	} catch (err) {
-		console.error('R2 put failed:', err);
-		return json({ error: 'storage_error' }, { status: 500 });
-	}
-
-	// An upload that arrives smaller than declared is corrupt, not a smaller
-	// file — refuse it, and durably remove the partial object.
-	if (size !== declaredLength) {
-		await purgeObject(platform, r2Key);
-		return json({ error: 'size_mismatch', declared: declaredLength, received: size }, { status: 400 });
-	}
-
 	const inserted = await insertFileIfWithinQuota(DB, {
 		id,
 		user_id: locals.user.id,
 		name,
-		size,
+		size: declaredLength,
 		content_type: contentType,
-		r2_key: r2Key,
+		r2_key: id,
 		created_at: Date.now()
 	});
 
 	if (!inserted) {
-		await purgeObject(platform, r2Key);
 		return json(storageFull(), { status: 413 });
 	}
 
-	return json({ id, name, size }, { status: 201 });
+	let received = 0;
+	let index = 0;
+	let pending = new Uint8Array();
+	const reader = request.body?.getReader();
+	try {
+		while (reader) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const combined = new Uint8Array(pending.length + value.length);
+			combined.set(pending);
+			combined.set(value, pending.length);
+			let offset = 0;
+			while (combined.length - offset >= CHUNK_BYTES) {
+				const chunk = combined.slice(offset, offset + CHUNK_BYTES);
+				await DB.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
+					.bind(id, index++, chunk.buffer)
+					.run();
+				received += chunk.length;
+				offset += CHUNK_BYTES;
+			}
+			pending = combined.slice(offset);
+		}
+		if (pending.length) {
+			await DB.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
+				.bind(id, index, pending.buffer)
+				.run();
+			received += pending.length;
+		}
+	} catch (err) {
+		console.error('D1 file write failed:', err);
+		await deleteFileRow(DB, locals.user.id, id);
+		return json({ error: 'storage_error' }, { status: 500 });
+	}
+	if (received !== declaredLength) {
+		await deleteFileRow(DB, locals.user.id, id);
+		return json({ error: 'size_mismatch', declared: declaredLength, received }, { status: 400 });
+	}
+
+	return json({ id, name, size: received }, { status: 201 });
 };
 
 function storageFull() {

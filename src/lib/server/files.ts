@@ -3,6 +3,7 @@ export const QUOTA_BYTES = 100 * 1024 * 1024; // 100MB per customer. No exceptio
 // A byte quota alone can't bound zero-byte files, so cap the row/object count
 // too. 71.1 floppies of 500-byte files is already absurd; 2000 is generous.
 export const MAX_FILES = 2000;
+export const CHUNK_BYTES = 1024 * 1024;
 
 export interface FileRow {
 	id: string;
@@ -132,6 +133,21 @@ export async function deleteFileRow(db: D1Database, userId: string, id: string):
 	return result.meta.changes > 0;
 }
 
+export function fileBody(db: D1Database, id: string, size: number) {
+	let index = 0;
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			if (index * CHUNK_BYTES >= size) return controller.close();
+			const row = await db
+				.prepare('SELECT data FROM file_chunks WHERE file_id = ? AND chunk_index = ?')
+				.bind(id, index++)
+				.first<{ data: ArrayBuffer }>();
+			if (!row) return controller.error(new Error('File chunk missing'));
+			controller.enqueue(new Uint8Array(row.data));
+		}
+	});
+}
+
 export async function setShareToken(
 	db: D1Database,
 	userId: string,
@@ -143,31 +159,4 @@ export async function setShareToken(
 		.bind(token, id, userId)
 		.run();
 	return result.meta.changes > 0;
-}
-
-/**
- * Delete an R2 object such that the delete still completes even if the client
- * disconnects mid-request: we register it with `waitUntil` (production Workers)
- * AND await it, so an orphaned object never survives a compensating cleanup.
- *
- * Resolves true only when the object is really gone. Callers that free quota
- * MUST check this — dropping the row after a failed delete would leave bytes
- * stored but uncharged.
- */
-export function purgeObject(
-	platform: Readonly<App.Platform> | undefined,
-	r2Key: string
-): Promise<boolean> {
-	const bucket = platform?.env.BUCKET;
-	if (!bucket) return Promise.resolve(false);
-	const done = bucket
-		.delete(r2Key)
-		.then(() => true)
-		.catch((err) => {
-			console.error('R2 delete failed (possible orphan):', r2Key, err);
-			return false;
-		});
-	// `context` is absent under the local vite platform proxy; await still runs.
-	platform?.context?.waitUntil?.(done);
-	return done;
 }

@@ -13,7 +13,6 @@
 		"db:migrate:local": "wrangler d1 migrations apply drive --local",
 		"db:migrate:remote": "wrangler d1 migrations apply drive --remote",
 		"cf:db:create": "wrangler d1 create drive",
-		"cf:bucket:create": "wrangler r2 bucket create drive-files",
 		"cf:deploy": "wrangler deploy"
 	},
 	"devDependencies": {

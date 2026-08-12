@@ -14,7 +14,7 @@ emptiness. Every account receives exactly **71.1 floppy disks (100MB)**. Kevin i
 
 - Sign in with **Southbag Identity™** via OIDC (authorization code + PKCE, discovery-driven
   against `https://identity.southbag.cc/.well-known/openid-configuration`)
-- Upload — raw-body PUT streamed straight into R2, no multipart, no Worker memory blowups
+- Upload — raw-body PUT split into 1MB D1 BLOB chunks
 - **100MB per-user quota**, enforced server-side with a quota-guarded conditional `INSERT` so
   concurrent uploads can't squeeze past the limit (the loser's blob is deleted)
 - Download, rename, delete, and public share links
@@ -27,9 +27,7 @@ confirm while deleting does not, and the storage meter measures how *empty* your
 ## Stack
 
 SvelteKit (Svelte 5) + `@sveltejs/adapter-cloudflare` on **Cloudflare Workers**, with **D1**
-(file metadata, sessions) and **R2** (blobs). Fits entirely in the Workers/D1/R2 free tiers:
-uploads and downloads stream, nothing buffers a full file in production, and the free plan's
-100MB request-body limit conveniently equals one whole customer quota.
+for metadata, sessions, and chunked file blobs.
 
 ## Local development
 
@@ -51,7 +49,6 @@ the real identity service instead, fill in real values in `.dev.vars` (see Produ
 
    ```sh
    bunx wrangler d1 create drive          # copy database_id into wrangler.jsonc
-   bunx wrangler r2 bucket create drive-files
    bun run db:migrate:remote
    ```
 
