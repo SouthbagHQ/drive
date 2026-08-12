@@ -182,7 +182,10 @@ export async function exchangeCode(
 	const { token_endpoint } = await getMetadata(env.IDENTITY_ISSUER);
 	const res = await fetch(token_endpoint, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			Origin: new URL(token_endpoint).origin
+		},
 		body: new URLSearchParams({
 			grant_type: 'authorization_code',
 			code,
