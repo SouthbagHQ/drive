@@ -131,19 +131,19 @@
 		try {
 			const probe = await fetch(`/api/files/${file.id}`, { method: 'HEAD' });
 			if (!probe.ok) {
-				alert('That file could not be downloaded. It may have been deleted. Refreshing.');
+				alert('That file could not be downloaded. It may have been deleted by you or Kevin.');
 				await invalidateAll();
 				return;
 			}
 		} catch {
-			alert('Download could not be started. Please try again.');
+			alert('Download could not be started for some reason.');
 			return;
 		}
 		location.href = `/api/files/${file.id}`;
 	}
 
 	async function rename(file: VaultFile) {
-		const name = prompt('New name (extensions are your problem):', file.name);
+		const name = prompt('New name:', file.name);
 		if (name === null || name === file.name) return;
 		const res = await fetch(`/api/files/${file.id}`, {
 			method: 'PATCH',
@@ -154,7 +154,7 @@
 			notify('File renamed.');
 			await invalidateAll();
 		} else {
-			alert('Rename failed. The file prefers its old name.');
+			alert('Rename failed. The file or Kevin prefers its old name.');
 		}
 	}
 
@@ -166,7 +166,7 @@
 		});
 
 		if (!res.ok) {
-			alert('That did not work. Refreshing.');
+			alert('That did not work. Refreshing. Kevin is watching.');
 			await invalidateAll();
 			return;
 		}
@@ -175,7 +175,7 @@
 			notify('Link removed.');
 		} else {
 			const { url } = (await res.json()) as { url: string };
-			prompt('Your link (press Ctrl+C, then OK, then remember it forever):', url);
+			prompt('Your link', url);
 		}
 		await invalidateAll();
 	}
@@ -183,7 +183,7 @@
 	async function remove(file: VaultFile) {
 		const res = await fetch(`/api/files/${file.id}`, { method: 'DELETE' });
 		if (res.ok) {
-			notify(`Deleted "${file.name}".`);
+			notify(`Deleted "${file.name}". Kevin retains a copy.`);
 			await invalidateAll();
 		} else {
 			alert('Delete failed. The file resisted.');
@@ -202,11 +202,11 @@
 	<div class="meter">
 		<div class="meter-fill" style={`width: ${remainingPct}%`}></div>
 		<div class="meter-label">
-			{remainingPct.toFixed(1)}% empty — {toFloppies(data.used)} of 71.1 floppy disks used
+			{remainingPct.toFixed(1)}% empty — {toFloppies(data.used)} of 71.1 data used
 		</div>
 	</div>
 	<p class="tiny" title={toCdRoms(data.used)}>
-		Every account gets 100MB, measured in industry-standard floppy disks.
+		Every account gets 71.1 floppy disks
 	</p>
 </section>
 
@@ -254,7 +254,7 @@
 		{#if data.files.length === 0}
 			<p>No files yet.</p>
 		{:else}
-			<p>No files match "{search}". Capitalisation is a virtue.</p>
+			<p>No files match "{search}"</p>
 		{/if}
 	{:else}
 		<table class="file-table">

@@ -114,6 +114,6 @@ function storageFull() {
 	return {
 		error: 'storage_full',
 		message:
-			'Upload rejected. Southbag Drive™ provides exactly 71.1 floppy disks (100MB) per account. Try deleting something.'
+			'Upload rejected. Southbag Drive™ provides exactly 71.1 floppy disks per account. Try deleting something.'
 	};
 }

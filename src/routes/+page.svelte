@@ -6,17 +6,17 @@
 
 <svelte:head>
 	<title>Southbag Drive™</title>
-	<meta name="description" content="Southbag Drive™ — 100MB of file storage." />
+	<meta name="description" content="Southbag Drive™" />
 </svelte:head>
 
 <img class="logo-strip" alt="Southbag" src="/logo.png" />
 
 <main class="landing">
 	<h1>Southbag Drive™</h1>
-	<p>100MB of file storage, measured in floppy disks.</p>
+	<p>100MB of storage</p>
 
 	{#if data.denied}
-		<p><strong>Login failed ({data.denied}). Please try again.</strong></p>
+		<p><strong>Login failed. Your account may have been disabled by Kevin.</strong></p>
 	{/if}
 
 	<div class="button-row">
