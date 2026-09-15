@@ -19,7 +19,7 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	const rawLength = request.headers.get('content-length');
 	if (rawLength === null) {
 		return json(
-			{ error: 'length_required', message: 'Declare your Content-Length. Files must be weighed.' },
+			{ error: 'length_required', message: 'Upload rejected.' },
 			{ status: 411 }
 		);
 	}
@@ -28,7 +28,7 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	// a real file has at least one byte.
 	if (!Number.isInteger(declaredLength) || declaredLength < 1) {
 		return json(
-			{ error: 'empty_file', message: 'Empty files are not files. Upload at least one (1) byte.' },
+			{ error: 'empty_file', message: 'Empty files cannot be uploaded.' },
 			{ status: 400 }
 		);
 	}

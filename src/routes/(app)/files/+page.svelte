@@ -66,7 +66,7 @@
 		}
 		if (file.size > data.quota - data.used) {
 			alert(
-				`Upload rejected. That file is ${toFloppies(file.size)} but you only have ${toFloppies(data.quota - data.used)} of emptiness left.`
+				`Upload rejected. That file is ${toFloppies(file.size)} but you only have ${toFloppies(data.quota - data.used)} left.`
 			);
 			return;
 		}
@@ -245,7 +245,7 @@
 			</select>
 		</label>
 		<label class="field">
-			<span>Search (case-sensitive)</span>
+			<span>Search</span>
 			<input bind:value={search} placeholder="Exact substrings only" />
 		</label>
 	</div>

@@ -10,7 +10,7 @@
 
 <main class="landing">
 	<h1>Error {page.status}</h1>
-	<p>{page.error?.message ?? 'Something happened. Or did not.'}</p>
+	<p>{page.error?.message ?? 'Something went wrong. Kevin has been notified.'}</p>
 	<div class="button-row">
 		<a class="button-link btn-large" href="/">Go back</a>
 		<a class="button-link" href="https://support.southbag.cc/ai">Chat with a Human</a>
