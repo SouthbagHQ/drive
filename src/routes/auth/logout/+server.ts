@@ -2,9 +2,12 @@ import { error, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { destroySession, takeSessionIdToken } from '$lib/server/session';
 import { endSessionUrl } from '$lib/server/oidc';
+import { capture, palantirOptions } from '$lib/server/palantir';
 
-export const POST: RequestHandler = async ({ platform, cookies }) => {
+export const POST: RequestHandler = async ({ platform, cookies, locals, request }) => {
 	if (!platform) error(500, 'Platform bindings unavailable');
+
+	capture('drive_logout', locals.user?.id, {}, palantirOptions(request, platform));
 
 	// Grab the id_token before we drop the session, so we can ask the identity
 	// provider to end the SSO session too — otherwise "Sign out" only clears the

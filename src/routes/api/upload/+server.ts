@@ -8,16 +8,22 @@ import {
 	sanitizeFileName,
 	storageUsed
 } from '$lib/server/files';
+import { capture, palantirOptions } from '$lib/server/palantir';
 
 export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	if (!locals.user) return json({ error: 'unauthorized' }, { status: 401 });
 	if (!platform) return json({ error: 'no_platform' }, { status: 500 });
 	const { DB } = platform.env;
+	const palantir = palantirOptions(request, platform);
+	const userId = locals.user.id;
+	const rejected = (reason: string, extra: Record<string, unknown> = {}) =>
+		capture('drive_upload_rejected', userId, { reason, ...extra }, palantir);
 
 	// A truly absent Content-Length can't be metered up front. Number(null) is
 	// 0, which would otherwise sail past the guards, so check the raw header.
 	const rawLength = request.headers.get('content-length');
 	if (rawLength === null) {
+		rejected('length_required');
 		return json(
 			{ error: 'length_required', message: 'Upload rejected.' },
 			{ status: 411 }
@@ -27,12 +33,14 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	// Empty uploads consume no quota, so unlimited ones would defeat the cap —
 	// a real file has at least one byte.
 	if (!Number.isInteger(declaredLength) || declaredLength < 1) {
+		rejected('empty_file');
 		return json(
 			{ error: 'empty_file', message: 'Empty files cannot be uploaded.' },
 			{ status: 400 }
 		);
 	}
 	if (declaredLength > QUOTA_BYTES) {
+		rejected('storage_full', { size: declaredLength, stage: 'larger_than_quota' });
 		return json(storageFull(), { status: 413 });
 	}
 
@@ -40,6 +48,7 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	// authoritative check.
 	const used = await storageUsed(DB, locals.user.id);
 	if (used + declaredLength > QUOTA_BYTES) {
+		rejected('storage_full', { size: declaredLength, used, stage: 'precheck' });
 		return json(storageFull(), { status: 413 });
 	}
 
@@ -66,6 +75,7 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	});
 
 	if (!inserted) {
+		rejected('storage_full', { size: declaredLength, used, stage: 'insert' });
 		return json(storageFull(), { status: 413 });
 	}
 
@@ -100,13 +110,39 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	} catch (err) {
 		console.error('D1 file write failed:', err);
 		await deleteFileRow(DB, locals.user.id, id);
+		capture(
+			'drive_upload_failed',
+			userId,
+			{ reason: 'storage_error', size: declaredLength, content_type: contentType },
+			palantir
+		);
 		return json({ error: 'storage_error' }, { status: 500 });
 	}
 	if (received !== declaredLength) {
 		await deleteFileRow(DB, locals.user.id, id);
+		capture(
+			'drive_upload_failed',
+			userId,
+			{ reason: 'size_mismatch', declared: declaredLength, received, content_type: contentType },
+			palantir
+		);
 		return json({ error: 'size_mismatch', declared: declaredLength, received }, { status: 400 });
 	}
 
+	capture(
+		'drive_file_uploaded',
+		userId,
+		{
+			file_id: id,
+			size: received,
+			content_type: contentType,
+			extension: name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : null,
+			chunks: index + 1,
+			storage_used_after: used + received,
+			quota: QUOTA_BYTES
+		},
+		palantir
+	);
 	return json({ id, name, size: received }, { status: 201 });
 };
 

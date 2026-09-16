@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { fortnightsAgo, toCdRoms, toFloppies, truncateFront } from '$lib/format';
+	import { capture } from '$lib/palantir';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -21,6 +22,24 @@
 	// --- sorting & searching --------------------------------------------------
 	let sortMode = $state('shuffled');
 	let search = $state('');
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function onSortChange() {
+		capture('drive_sort_changed', { sort: sortMode, files: data.files.length });
+	}
+
+	// Searching fires per keystroke; report once the typing pauses.
+	function onSearchInput() {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			if (!search) return;
+			capture('drive_files_searched', {
+				query_length: search.length,
+				results: visibleFiles.length,
+				files: data.files.length
+			});
+		}, 600);
+	}
 
 	// Cheap deterministic hash so "Shuffled" is stable within a visit but
 	// different on the next one.
@@ -58,13 +77,36 @@
 	let uploading = $state(false);
 	let remainingProgress = $state(100);
 
+	function fileProps(file: File) {
+		return {
+			size: file.size,
+			content_type: file.type || 'application/octet-stream',
+			extension: file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase() : null
+		};
+	}
+
+	function onFilePicked() {
+		const file = fileInput?.files?.[0];
+		if (file) capture('drive_upload_file_picked', fileProps(file));
+	}
+
+	function onAmountTyped() {
+		// The amount box does nothing. People still fill it in.
+		capture('drive_amount_box_used');
+	}
+
 	function upload() {
 		const file = fileInput?.files?.[0];
 		if (!file) {
+			capture('drive_upload_without_file');
 			alert('Select a file first. The amount box does not count.');
 			return;
 		}
 		if (file.size > data.quota - data.used) {
+			capture('drive_upload_blocked_client', {
+				...fileProps(file),
+				remaining: data.quota - data.used
+			});
 			alert(
 				`Upload rejected. That file is ${toFloppies(file.size)} but you only have ${toFloppies(data.quota - data.used)} left.`
 			);
@@ -73,6 +115,8 @@
 
 		uploading = true;
 		remainingProgress = 100;
+		const startedAt = Date.now();
+		capture('drive_upload_started', fileProps(file));
 
 		const contentType = file.type || 'application/octet-stream';
 		try {
@@ -97,6 +141,10 @@
 			xhr.onload = async () => {
 				uploading = false;
 				if (xhr.status === 201) {
+					capture('drive_upload_succeeded', {
+						...fileProps(file),
+						duration_ms: Date.now() - startedAt
+					});
 					notify('File uploaded.');
 					if (fileInput) fileInput.value = '';
 					await invalidateAll();
@@ -107,30 +155,50 @@
 					} catch {
 						// the reasons remain unknowable
 					}
+					capture('drive_upload_error_shown', {
+						...fileProps(file),
+						status: xhr.status,
+						duration_ms: Date.now() - startedAt
+					});
 					alert(message);
 				}
 			};
 			xhr.onerror = () => {
 				uploading = false;
+				capture('drive_upload_error_shown', {
+					...fileProps(file),
+					status: 0,
+					duration_ms: Date.now() - startedAt
+				});
 				alert('Upload failed. Please try again.');
 			};
 			xhr.send(file);
 		} catch (err) {
 			// Any synchronous throw during setup must still release the button.
 			uploading = false;
+			capture('drive_upload_error_shown', { ...fileProps(file), status: -1, stage: 'setup' });
 			alert('Upload could not be started. Please try again.');
 			console.error('upload setup failed:', err);
 		}
 	}
 
 	// --- operations -----------------------------------------------------------
+	function fileRowProps(file: VaultFile) {
+		return { file_id: file.id, size: file.size, content_type: file.contentType, shared: Boolean(file.shareToken) };
+	}
+
 	async function download(file: VaultFile) {
-		if (!confirm(`Download "${file.name}"?`)) return;
+		if (!confirm(`Download "${file.name}"?`)) {
+			capture('drive_download_cancelled', fileRowProps(file));
+			return;
+		}
+		capture('drive_download_clicked', fileRowProps(file));
 		// Probe first: on error the endpoint returns a bare JSON document, and a
 		// plain navigation would replace the whole app with it.
 		try {
 			const probe = await fetch(`/api/files/${file.id}`, { method: 'HEAD' });
 			if (!probe.ok) {
+				capture('drive_download_probe_failed', { ...fileRowProps(file), status: probe.status });
 				alert('That file could not be downloaded. It may have been deleted by you or Kevin.');
 				await invalidateAll();
 				return;
@@ -143,8 +211,12 @@
 	}
 
 	async function rename(file: VaultFile) {
+		capture('drive_rename_clicked', fileRowProps(file));
 		const name = prompt('New name:', file.name);
-		if (name === null || name === file.name) return;
+		if (name === null || name === file.name) {
+			capture('drive_rename_cancelled', fileRowProps(file));
+			return;
+		}
 		const res = await fetch(`/api/files/${file.id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
@@ -154,11 +226,13 @@
 			notify('File renamed.');
 			await invalidateAll();
 		} else {
+			capture('drive_rename_error_shown', { ...fileRowProps(file), status: res.status });
 			alert('Rename failed. The file or Kevin prefers its old name.');
 		}
 	}
 
 	async function share(file: VaultFile) {
+		capture(file.shareToken ? 'drive_remove_link_clicked' : 'drive_get_link_clicked', fileRowProps(file));
 		const res = await fetch(`/api/files/${file.id}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -166,6 +240,7 @@
 		});
 
 		if (!res.ok) {
+			capture('drive_share_error_shown', { ...fileRowProps(file), status: res.status });
 			alert('That did not work. Refreshing. Kevin is watching.');
 			await invalidateAll();
 			return;
@@ -176,16 +251,20 @@
 		} else {
 			const { url } = (await res.json()) as { url: string };
 			prompt('Your link', url);
+			capture('drive_share_link_shown', fileRowProps(file));
 		}
 		await invalidateAll();
 	}
 
 	async function remove(file: VaultFile) {
+		// No confirmation dialog. Deliberately.
+		capture('drive_delete_clicked', fileRowProps(file));
 		const res = await fetch(`/api/files/${file.id}`, { method: 'DELETE' });
 		if (res.ok) {
 			notify(`Deleted "${file.name}". Kevin retains a copy.`);
 			await invalidateAll();
 		} else {
+			capture('drive_delete_error_shown', { ...fileRowProps(file), status: res.status });
 			alert('Delete failed. The file resisted.');
 		}
 	}
@@ -199,13 +278,21 @@
 
 <section class="panel">
 	<h2>Storage</h2>
-	<div class="meter">
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+	<div
+		class="meter"
+		onclick={() => capture('drive_storage_meter_clicked', { remaining_pct: remainingPct, used: data.used })}
+	>
 		<div class="meter-fill" style={`width: ${remainingPct}%`}></div>
 		<div class="meter-label">
 			{remainingPct.toFixed(1)}% empty — {toFloppies(data.used)} of 71.1 data used
 		</div>
 	</div>
-	<p class="tiny" title={toCdRoms(data.used)}>
+	<p
+		class="tiny"
+		title={toCdRoms(data.used)}
+		onmouseenter={() => capture('drive_floppy_hint_hovered', { used: data.used })}
+	>
 		Every account gets 71.1 floppy disks
 	</p>
 </section>
@@ -214,11 +301,11 @@
 	<h2>Upload</h2>
 	<label class="field">
 		<span>amount</span>
-		<input placeholder="Enter Amount" />
+		<input placeholder="Enter Amount" onchange={onAmountTyped} />
 	</label>
 	<label class="field">
 		<span>file</span>
-		<input type="file" bind:this={fileInput} />
+		<input type="file" bind:this={fileInput} onchange={onFilePicked} />
 	</label>
 	{#if uploading}
 		<div class="progress">
@@ -236,7 +323,7 @@
 	<div class="controls">
 		<label class="field">
 			<span>Sort</span>
-			<select bind:value={sortMode}>
+			<select bind:value={sortMode} onchange={onSortChange}>
 				<option value="shuffled">Shuffled (recommended)</option>
 				<option value="nameDesc">Name (Z→A)</option>
 				<option value="secondLetter">Second letter of name (A→Z)</option>
@@ -246,7 +333,7 @@
 		</label>
 		<label class="field">
 			<span>Search</span>
-			<input bind:value={search} placeholder="Exact substrings only" />
+			<input bind:value={search} placeholder="Exact substrings only" oninput={onSearchInput} />
 		</label>
 	</div>
 
@@ -275,7 +362,10 @@
 						<td>{fortnightsAgo(file.createdAt)}</td>
 						<td>
 							{#if file.shareToken}
-								<a href={`/share/${file.shareToken}`}>yes</a>
+								<a
+									href={`/share/${file.shareToken}`}
+									onclick={() => capture('drive_own_share_link_clicked', fileRowProps(file))}>yes</a
+								>
 							{:else}
 								no
 							{/if}

@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { fortnightsAgo, toCdRoms, toFloppies } from '$lib/format';
+	import { capture } from '$lib/palantir';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	const fileProps = $derived({ size: data.file.size, content_type: data.file.contentType });
 </script>
 
 <svelte:head>
@@ -23,13 +26,25 @@
 			</p>
 			<p><strong>Age:</strong> {fortnightsAgo(data.file.createdAt)}</p>
 			<div class="button-row">
-				<a class="button-link btn-large" href={`/share/${data.token}/download`}>Download</a>
-				<a class="button-link" href="https://support.southbag.cc/ai">Chat with a Human</a>
+				<a
+					class="button-link btn-large"
+					href={`/share/${data.token}/download`}
+					onclick={() => capture('drive_shared_download_clicked', fileProps)}>Download</a
+				>
+				<a
+					class="button-link"
+					href="https://support.southbag.cc/ai"
+					onclick={() => capture('drive_chat_with_human_clicked', { from: 'share' })}
+					>Chat with a Human</a
+				>
 			</div>
 		</section>
 
 		<p class="tiny">
-			Anyone with this link can download this file. <a href="/">Get your own Southbag Drive™</a>.
+			Anyone with this link can download this file.
+			<a href="/" onclick={() => capture('drive_get_your_own_clicked', fileProps)}
+				>Get your own Southbag Drive™</a
+			>.
 		</p>
 	</main>
 

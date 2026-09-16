@@ -8,10 +8,13 @@ import {
 	generateCodeVerifier,
 	generateState
 } from '$lib/server/oidc';
+import { capture, palantirOptions } from '$lib/server/palantir';
 
-export const GET: RequestHandler = async ({ locals, platform, cookies }) => {
+export const GET: RequestHandler = async ({ locals, platform, cookies, request }) => {
 	if (locals.user) redirect(302, '/files');
 	if (!platform) error(500, 'Platform bindings unavailable');
+
+	capture('drive_login_started', undefined, {}, palantirOptions(request, platform));
 
 	const state = generateState();
 	const verifier = generateCodeVerifier();
