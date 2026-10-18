@@ -78,6 +78,19 @@ export async function storageUsed(db: D1Database, userId: string): Promise<numbe
 	return row?.used ?? 0;
 }
 
+export async function getFileByName(
+	db: D1Database,
+	userId: string,
+	name: string
+): Promise<FileRow | null> {
+	return db
+		.prepare(
+			'SELECT * FROM files WHERE user_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1'
+		)
+		.bind(userId, name)
+		.first<FileRow>();
+}
+
 /**
  * Insert a file row only if it fits in both the byte quota AND the file-count
  * cap. Both checks and the insert happen in one statement so concurrent
@@ -85,14 +98,16 @@ export async function storageUsed(db: D1Database, userId: string): Promise<numbe
  */
 export async function insertFileIfWithinQuota(
 	db: D1Database,
-	file: Omit<FileRow, 'share_token'>
+	file: Omit<FileRow, 'share_token'>,
+	options: { exceptFileId?: string | null } = {}
 ): Promise<boolean> {
+	const exceptFileId = options.exceptFileId ?? null;
 	const result = await db
 		.prepare(
 			`INSERT INTO files (id, user_id, name, size, content_type, r2_key, share_token, created_at)
 			 SELECT ?, ?, ?, ?, ?, ?, NULL, ?
-			 WHERE (SELECT COALESCE(SUM(size), 0) FROM files WHERE user_id = ?) + ? <= ?
-			   AND (SELECT COUNT(*) FROM files WHERE user_id = ?) < ?`
+			 WHERE (SELECT COALESCE(SUM(size), 0) FROM files WHERE user_id = ? AND (? IS NULL OR id != ?)) + ? <= ?
+			   AND (SELECT COUNT(*) FROM files WHERE user_id = ? AND (? IS NULL OR id != ?)) < ?`
 		)
 		.bind(
 			file.id,
@@ -103,9 +118,13 @@ export async function insertFileIfWithinQuota(
 			file.r2_key,
 			file.created_at,
 			file.user_id,
+			exceptFileId,
+			exceptFileId,
 			file.size,
 			QUOTA_BYTES,
 			file.user_id,
+			exceptFileId,
+			exceptFileId,
 			MAX_FILES
 		)
 		.run();
@@ -134,18 +153,181 @@ export async function deleteFileRow(db: D1Database, userId: string, id: string):
 }
 
 export function fileBody(db: D1Database, id: string, size: number) {
-	let index = 0;
+	return fileBodyRange(db, id, size, 0, Math.max(0, size - 1));
+}
+
+/** Inclusive `start`/`end`. Empty files produce an immediately-closing stream. */
+export function fileBodyRange(db: D1Database, id: string, size: number, start: number, end: number) {
+	if (size <= 0 || end < start) {
+		return new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.close();
+			}
+		});
+	}
+	let remaining = end - start + 1;
+	let index = Math.floor(start / CHUNK_BYTES);
+	let skip = start % CHUNK_BYTES;
 	return new ReadableStream<Uint8Array>({
 		async pull(controller) {
-			if (index * CHUNK_BYTES >= size) return controller.close();
+			if (remaining <= 0) return controller.close();
 			const row = await db
 				.prepare('SELECT data FROM file_chunks WHERE file_id = ? AND chunk_index = ?')
 				.bind(id, index++)
 				.first<{ data: ArrayBuffer }>();
 			if (!row) return controller.error(new Error('File chunk missing'));
-			controller.enqueue(new Uint8Array(row.data));
+			let data = new Uint8Array(row.data);
+			if (skip) {
+				data = data.subarray(skip);
+				skip = 0;
+			}
+			if (data.length > remaining) data = data.subarray(0, remaining);
+			remaining -= data.length;
+			controller.enqueue(data);
 		}
 	});
+}
+
+export type StoreFileResult =
+	| { ok: true; id: string; name: string; size: number; chunks: number }
+	| {
+			ok: false;
+			error: 'empty_file' | 'storage_full' | 'size_mismatch' | 'storage_error' | 'too_large';
+			declared?: number;
+			received?: number;
+	  };
+
+/**
+ * Reserve quota with a conditional INSERT, then stream the body into 1MB D1
+ * chunks. `replaceFileId` (if set) is excluded from the quota/count checks and
+ * deleted only after the new object is fully written.
+ */
+export async function storeRequestBodyAsFile(
+	db: D1Database,
+	args: {
+		userId: string;
+		name: string;
+		contentType: string;
+		body: ReadableStream<Uint8Array> | null;
+		declaredLength: number;
+		allowEmpty?: boolean;
+		replaceFileId?: string | null;
+	}
+): Promise<StoreFileResult> {
+	const { userId, name, contentType, body, declaredLength, allowEmpty, replaceFileId } = args;
+	if (!Number.isInteger(declaredLength) || declaredLength < 0) {
+		return { ok: false, error: 'empty_file', declared: declaredLength };
+	}
+	if (declaredLength === 0 && !allowEmpty) {
+		return { ok: false, error: 'empty_file', declared: 0 };
+	}
+	if (declaredLength > QUOTA_BYTES) {
+		return { ok: false, error: 'too_large', declared: declaredLength };
+	}
+
+	const id = crypto.randomUUID();
+	const inserted = await insertFileIfWithinQuota(
+		db,
+		{
+			id,
+			user_id: userId,
+			name,
+			size: declaredLength,
+			content_type: contentType,
+			r2_key: id,
+			created_at: Date.now()
+		},
+		{ exceptFileId: replaceFileId }
+	);
+	if (!inserted) return { ok: false, error: 'storage_full', declared: declaredLength };
+
+	let received = 0;
+	let chunks = 0;
+	if (declaredLength > 0) {
+		let index = 0;
+		let pending = new Uint8Array();
+		const reader = body?.getReader();
+		try {
+			while (reader) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				const combined = new Uint8Array(pending.length + value.length);
+				combined.set(pending);
+				combined.set(value, pending.length);
+				let offset = 0;
+				while (combined.length - offset >= CHUNK_BYTES) {
+					const chunk = combined.slice(offset, offset + CHUNK_BYTES);
+					await db
+						.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
+						.bind(id, index++, chunk.buffer)
+						.run();
+					received += chunk.length;
+					offset += CHUNK_BYTES;
+				}
+				pending = combined.slice(offset);
+			}
+			if (pending.length) {
+				await db
+					.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
+					.bind(id, index, pending.buffer)
+					.run();
+				received += pending.length;
+				index += 1;
+			}
+			chunks = index;
+		} catch (err) {
+			console.error('D1 file write failed:', err);
+			await deleteFileRow(db, userId, id);
+			return { ok: false, error: 'storage_error', declared: declaredLength, received };
+		}
+		if (received !== declaredLength) {
+			await deleteFileRow(db, userId, id);
+			return { ok: false, error: 'size_mismatch', declared: declaredLength, received };
+		}
+	}
+
+	if (replaceFileId) await deleteFileRow(db, userId, replaceFileId);
+	return { ok: true, id, name, size: received, chunks };
+}
+
+export async function copyFileToName(
+	db: D1Database,
+	userId: string,
+	source: FileRow,
+	destName: string,
+	replaceFileId: string | null
+): Promise<FileRow | null> {
+	const id = crypto.randomUUID();
+	const inserted = await insertFileIfWithinQuota(
+		db,
+		{
+			id,
+			user_id: userId,
+			name: destName,
+			size: source.size,
+			content_type: source.content_type,
+			r2_key: id,
+			created_at: Date.now()
+		},
+		{ exceptFileId: replaceFileId }
+	);
+	if (!inserted) return null;
+	try {
+		if (source.size > 0) {
+			await db
+				.prepare(
+					'INSERT INTO file_chunks (file_id, chunk_index, data) SELECT ?, chunk_index, data FROM file_chunks WHERE file_id = ?'
+				)
+				.bind(id, source.id)
+				.run();
+		}
+	} catch (err) {
+		console.error('D1 file copy failed:', err);
+		await deleteFileRow(db, userId, id);
+		return null;
+	}
+	if (replaceFileId) await deleteFileRow(db, userId, replaceFileId);
+	return getFile(db, userId, id);
 }
 
 export async function setShareToken(

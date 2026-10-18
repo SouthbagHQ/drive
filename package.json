@@ -10,6 +10,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "bun test src/lib/server/webdav-util.test.ts src/lib/server/webdav.test.ts",
 		"db:migrate:local": "wrangler d1 migrations apply drive --local",
 		"db:migrate:remote": "wrangler d1 migrations apply drive --remote",
 		"cf:db:create": "wrangler d1 create drive",

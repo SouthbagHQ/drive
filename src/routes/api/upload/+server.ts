@@ -1,13 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import {
-	QUOTA_BYTES,
-	CHUNK_BYTES,
-	deleteFileRow,
-	insertFileIfWithinQuota,
-	sanitizeFileName,
-	storageUsed
-} from '$lib/server/files';
+import { QUOTA_BYTES, sanitizeFileName, storageUsed, storeRequestBodyAsFile } from '$lib/server/files';
 import { capture, palantirOptions } from '$lib/server/palantir';
 
 export const PUT: RequestHandler = async ({ request, locals, platform }) => {
@@ -63,87 +56,64 @@ export const PUT: RequestHandler = async ({ request, locals, platform }) => {
 	const contentType =
 		request.headers.get('x-sb-content-type')?.slice(0, 120) || 'application/octet-stream';
 
-	const id = crypto.randomUUID();
-	const inserted = await insertFileIfWithinQuota(DB, {
-		id,
-		user_id: locals.user.id,
+	const stored = await storeRequestBodyAsFile(DB, {
+		userId,
 		name,
-		size: declaredLength,
-		content_type: contentType,
-		r2_key: id,
-		created_at: Date.now()
+		contentType,
+		body: request.body,
+		declaredLength,
+		allowEmpty: false
 	});
 
-	if (!inserted) {
-		rejected('storage_full', { size: declaredLength, used, stage: 'insert' });
-		return json(storageFull(), { status: 413 });
-	}
-
-	let received = 0;
-	let index = 0;
-	let pending = new Uint8Array();
-	const reader = request.body?.getReader();
-	try {
-		while (reader) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			const combined = new Uint8Array(pending.length + value.length);
-			combined.set(pending);
-			combined.set(value, pending.length);
-			let offset = 0;
-			while (combined.length - offset >= CHUNK_BYTES) {
-				const chunk = combined.slice(offset, offset + CHUNK_BYTES);
-				await DB.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
-					.bind(id, index++, chunk.buffer)
-					.run();
-				received += chunk.length;
-				offset += CHUNK_BYTES;
-			}
-			pending = combined.slice(offset);
+	if (!stored.ok) {
+		if (stored.error === 'storage_full' || stored.error === 'too_large') {
+			rejected('storage_full', { size: declaredLength, used, stage: 'insert' });
+			return json(storageFull(), { status: 413 });
 		}
-		if (pending.length) {
-			await DB.prepare('INSERT INTO file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)')
-				.bind(id, index, pending.buffer)
-				.run();
-			received += pending.length;
+		if (stored.error === 'empty_file') {
+			rejected('empty_file');
+			return json(
+				{ error: 'empty_file', message: 'Empty files cannot be uploaded.' },
+				{ status: 400 }
+			);
 		}
-	} catch (err) {
-		console.error('D1 file write failed:', err);
-		await deleteFileRow(DB, locals.user.id, id);
 		capture(
 			'drive_upload_failed',
 			userId,
-			{ reason: 'storage_error', size: declaredLength, content_type: contentType },
+			{
+				reason: stored.error,
+				size: declaredLength,
+				content_type: contentType,
+				...(stored.error === 'size_mismatch'
+					? { declared: stored.declared, received: stored.received }
+					: {})
+			},
 			palantir
 		);
+		if (stored.error === 'size_mismatch') {
+			return json(
+				{ error: 'size_mismatch', declared: stored.declared, received: stored.received },
+				{ status: 400 }
+			);
+		}
 		return json({ error: 'storage_error' }, { status: 500 });
-	}
-	if (received !== declaredLength) {
-		await deleteFileRow(DB, locals.user.id, id);
-		capture(
-			'drive_upload_failed',
-			userId,
-			{ reason: 'size_mismatch', declared: declaredLength, received, content_type: contentType },
-			palantir
-		);
-		return json({ error: 'size_mismatch', declared: declaredLength, received }, { status: 400 });
 	}
 
 	capture(
 		'drive_file_uploaded',
 		userId,
 		{
-			file_id: id,
-			size: received,
+			file_id: stored.id,
+			size: stored.size,
 			content_type: contentType,
 			extension: name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : null,
-			chunks: index + 1,
-			storage_used_after: used + received,
+			chunks: stored.chunks,
+			storage_used_after: used + stored.size,
 			quota: QUOTA_BYTES
 		},
 		palantir
 	);
-	return json({ id, name, size: received }, { status: 201 });
+	return json({ id: stored.id, name, size: stored.size }, { status: 201 });
 };
 
 function storageFull() {

@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { QUOTA_BYTES, listFiles, storageUsed } from '$lib/server/files';
+import { hasWebdavToken } from '$lib/server/webdav-auth';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	if (!locals.user) error(401, 'Unauthorized');
@@ -8,6 +9,7 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 
 	const files = await listFiles(platform.env.DB, locals.user.id);
 	const used = await storageUsed(platform.env.DB, locals.user.id);
+	const webdavConfigured = await hasWebdavToken(platform.env.DB, locals.user.id);
 
 	return {
 		files: files.map((f) => ({
@@ -19,6 +21,10 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 			createdAt: f.created_at
 		})),
 		used,
-		quota: QUOTA_BYTES
+		quota: QUOTA_BYTES,
+		webdavUrl: `${platform.env.ORIGIN}/webdav/`,
+		webdavUsername: locals.user.email,
+		webdavUsernameAlt: locals.user.id,
+		webdavConfigured
 	};
 };

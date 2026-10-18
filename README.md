@@ -18,6 +18,7 @@ emptiness. Every account receives exactly **71.1 floppy disks (100MB)**. Kevin i
 - **100MB per-user quota**, enforced server-side with a quota-guarded conditional `INSERT` so
   concurrent uploads can't squeeze past the limit (the loser's blob is deleted)
 - Download, rename, delete, and public share links
+- **WebDAV** at `/webdav/` (Class 1+2, Basic auth with an access token from the files page)
 - Sorting (Shuffled is the default and the recommendation) and case-sensitive search
 
 The interface is deliberately unhelpful in small ways: the upload form has a decoy "amount" box,
@@ -61,9 +62,23 @@ the real identity service instead, fill in real values in `.dev.vars` (see Produ
    bun run cf:deploy
    ```
 
+## WebDAV
+
+Issue a token on the files page, then mount `https://drive.southbag.cc/webdav/`. Username is your
+Southbag email (Windows Explorer eats `@`; if it does, use the account id shown next to it).
+Password is the token, not your Southbag password.
+
+There are still no folders. `MKCOL` is refused. A swapfile is allowed in the sense that it is a
+file named `swapfile` that counts against 71.1 floppy disks.
+
+```sh
+curl -u 'kevin@southbag.cc:sbdav_…' -X PROPFIND https://drive.southbag.cc/webdav/ -H 'Depth: 1'
+```
+
 ## Answers to anticipated support tickets
 
 - **Where are folders?** There are none.
+- **Does it support WebDAV?** Yes. `/webdav/`. Folders remain a rumour. Swapfiles are a PUT.
 - **Why is my storage full?** You used all 71.1 floppies. Delete something.
 - **Can deleting be undone?** No, and it does not ask first. Be careful.
 - **Who is Kevin?** Kevin is watching.
