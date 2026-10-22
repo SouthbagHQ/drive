@@ -3,3 +3,4 @@
 
 ORIGIN="http://localhost:5173"
 IDENTITY_ISSUER="https://identity.southbag.cc"
+OFFICE_ORIGIN="http://localhost:5173"
