@@ -210,6 +210,10 @@
 		location.href = `/api/files/${file.id}`;
 	}
 
+	function openInOffice(file: VaultFile) {
+		capture('drive_open_in_office_clicked', { ...fileRowProps(file), kind: file.officeKind });
+	}
+
 	async function rename(file: VaultFile) {
 		capture('drive_rename_clicked', fileRowProps(file));
 		const name = prompt('New name:', file.name);
@@ -447,6 +451,13 @@
 						<td>
 							<div class="operations">
 								<button onclick={() => download(file)}>Download</button>
+								{#if file.officeKind}
+									<a
+										class="button-link"
+										href={`${data.officeOrigin}/?drive=${encodeURIComponent(file.id)}`}
+										onclick={() => openInOffice(file)}>Open in Office™</a
+									>
+								{/if}
 								<button onclick={() => rename(file)}>Rename</button>
 								<button onclick={() => share(file)}>
 									{file.shareToken ? 'Remove link' : 'Get link'}

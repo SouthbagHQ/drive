@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { QUOTA_BYTES, listFiles, storageUsed } from '$lib/server/files';
 import { hasWebdavToken } from '$lib/server/webdav-auth';
+import { officeKindOf } from '$lib/server/office-storage';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	if (!locals.user) error(401, 'Unauthorized');
@@ -18,10 +19,12 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 			size: f.size,
 			contentType: f.content_type,
 			shareToken: f.share_token,
-			createdAt: f.created_at
+			createdAt: f.created_at,
+			officeKind: officeKindOf(f.name)
 		})),
 		used,
 		quota: QUOTA_BYTES,
+		officeOrigin: platform.env.OFFICE_ORIGIN,
 		webdavUrl: `${platform.env.ORIGIN}/webdav/`,
 		webdavUsername: locals.user.email,
 		webdavUsernameAlt: locals.user.id,

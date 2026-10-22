@@ -13,6 +13,7 @@ declare global {
 				DB: D1Database;
 				ORIGIN: string;
 				IDENTITY_ISSUER: string;
+				OFFICE_ORIGIN: string;
 			};
 			// `context` (with waitUntil) is contributed by adapter-cloudflare.
 		}

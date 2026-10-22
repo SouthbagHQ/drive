@@ -9,7 +9,10 @@
 		// The public origin this deployment is served from. Must exactly match
 		// the redirect URI registered with Southbag Identity™ (minus /auth/callback).
 		"ORIGIN": "https://drive.southbag.cc",
-		"IDENTITY_ISSUER": "https://identity.southbag.cc"
+		"IDENTITY_ISSUER": "https://identity.southbag.cc",
+		// Where "Open in Office™" links go. Office stores its documents here via
+		// the OfficeStorage service-binding entrypoint.
+		"OFFICE_ORIGIN": "https://office.southbag.cc"
 	},
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
