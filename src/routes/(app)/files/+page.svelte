@@ -268,6 +268,49 @@
 			alert('Delete failed. The file resisted.');
 		}
 	}
+
+	let webdavBusy = $state(false);
+
+	function selectField(e: Event) {
+		(e.currentTarget as HTMLInputElement).select();
+	}
+
+	async function issueWebdavToken() {
+		webdavBusy = true;
+		capture('drive_webdav_issue_clicked', { already: data.webdavConfigured });
+		try {
+			const res = await fetch('/api/webdav/token', { method: 'POST' });
+			if (!res.ok) {
+				capture('drive_webdav_issue_error_shown', { status: res.status });
+				alert('Token could not be issued. Kevin shrugged.');
+				return;
+			}
+			const { token } = (await res.json()) as { token: string };
+			prompt('Your WebDAV password. This is the only time.', token);
+			capture('drive_webdav_token_shown');
+			notify('WebDAV token issued.');
+			await invalidateAll();
+		} finally {
+			webdavBusy = false;
+		}
+	}
+
+	async function revokeWebdavToken() {
+		webdavBusy = true;
+		capture('drive_webdav_revoke_clicked');
+		try {
+			const res = await fetch('/api/webdav/token', { method: 'DELETE' });
+			if (res.ok) {
+				notify('WebDAV token revoked. Existing mounts will sulk.');
+				await invalidateAll();
+			} else {
+				capture('drive_webdav_revoke_error_shown', { status: res.status });
+				alert('Revoke failed. The token resisted.');
+			}
+		} finally {
+			webdavBusy = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -316,6 +359,37 @@
 	<button class="btn-large" disabled={uploading} onclick={upload}>
 		{uploading ? 'Uploading…' : 'Upload'}
 	</button>
+</section>
+
+<section class="panel">
+	<h2>WebDAV</h2>
+	<p>Mount this account as a network disk. Folders are not supported. Swapfiles are, until you run out of floppies.</p>
+	<label class="field">
+		<span>server</span>
+		<input readonly value={data.webdavUrl} onclick={selectField} onfocus={selectField} />
+	</label>
+	<label class="field">
+		<span>username</span>
+		<input readonly value={data.webdavUsername} onclick={selectField} onfocus={selectField} />
+	</label>
+	<p class="tiny">
+		Windows Explorer eats "@" signs. If it does, use {data.webdavUsernameAlt} instead.
+	</p>
+	<p class="tiny">
+		Password is not your Southbag password. It is a token we mint because WebDAV predates OIDC and we
+		are not going to un-invent that.
+	</p>
+	<div class="button-row">
+		<button disabled={webdavBusy} onclick={issueWebdavToken}>
+			{data.webdavConfigured ? 'Issue a new token' : 'Issue a token'}
+		</button>
+		{#if data.webdavConfigured}
+			<button disabled={webdavBusy} onclick={revokeWebdavToken}>Revoke token</button>
+		{/if}
+	</div>
+	{#if data.webdavConfigured}
+		<p class="tiny">A token is already issued. Issuing another one forgets the old one.</p>
+	{/if}
 </section>
 
 <section class="panel">
