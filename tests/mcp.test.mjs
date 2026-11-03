@@ -8,7 +8,11 @@ import { handleMcp, MCP_REQUEST_FEE_CENTS } from '../src/lib/server/mcp.ts';
 
 function d1Shim(db) {
   const prepare = sql => ({
-    bind(...params) { this.params = params; return this; },
+    bind(...params) {
+      // D1 accepts ArrayBuffer blob binds; node:sqlite wants Uint8Array.
+      this.params = params.map(p => (p instanceof ArrayBuffer ? new Uint8Array(p) : p));
+      return this;
+    },
     async first() { return db.prepare(sql).get(...(this.params || [])) ?? null; },
     async all() { return { results: db.prepare(sql).all(...(this.params || [])) }; },
     async run() {
@@ -77,7 +81,7 @@ test('tools/list is authenticated but free', async () => {
   const { env, charges, restore } = setup('u1');
   assert.equal((await handleMcp(post(rpc(1, 'tools/list')), env)).status, 401);
   const res = await handleMcp(post(rpc(2, 'tools/list'), auth), env);
-  assert.deepEqual((await res.json()).result.tools.map(t => t.name), ['list_files', 'get_storage']);
+  assert.deepEqual((await res.json()).result.tools.map(t => t.name), ['list_files', 'upload_text_file', 'get_storage']);
   assert.equal(charges.length, 0);
   restore();
 });
@@ -142,5 +146,36 @@ test('a pending row is terminal: never re-run, then replays once the original la
   const replay = await handleMcp(post(rpc(2, 'tools/call', { name: 'list_files' }), { ...auth, ...key }), env);
   assert.equal((await replay.json()).result.structuredContent.receipt.duplicate, true);
   assert.equal(charges.length, 0);
+  restore();
+});
+
+test('upload_text_file stores via the shared path, charges only the $1 request fee, replays safely', async () => {
+  const { db, env, charges, restore } = setup('u1');
+  const res = await handleMcp(post(rpc(1, 'tools/call', { name: 'upload_text_file', arguments: { name: 'notes.txt', content: 'Kevin was here.' } }), { ...auth, ...key }), env);
+  const body = await res.json();
+  assert.equal(body.result.isError, false);
+  const file = body.result.structuredContent.file;
+  assert.equal(file.name, 'notes.txt');
+  assert.equal(file.size, 15);
+  assert.equal(charges.length, 1);
+  assert.equal(charges[0].amount, 100);
+  const row = db.prepare('SELECT * FROM files WHERE id = ?').get(file.id);
+  assert.equal(row.content_type, 'text/plain; charset=utf-8');
+  // A retry replays: no second file, no second charge.
+  const res2 = await handleMcp(post(rpc(2, 'tools/call', { name: 'upload_text_file', arguments: { name: 'notes.txt', content: 'Kevin was here.' } }), { ...auth, ...key }), env);
+  assert.equal((await res2.json()).result.structuredContent.receipt.duplicate, true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM files').get().n, 1);
+  assert.equal(charges.length, 1);
+  restore();
+});
+
+test('upload_text_file validates BEFORE fees: missing name or content is a free rejection', async () => {
+  const { db, env, charges, restore } = setup('u1');
+  const res = await handleMcp(post(rpc(1, 'tools/call', { name: 'upload_text_file', arguments: { content: 'x' } }), { ...auth, ...key }), env);
+  const body = await res.json();
+  assert.equal(body.result.isError, true);
+  assert.match(body.result.content[0].text, /No fees charged/);
+  assert.equal(charges.length, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mcp_call').get().n, 0);
   restore();
 });

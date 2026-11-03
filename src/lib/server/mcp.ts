@@ -18,6 +18,7 @@
 // stays reconciliation-required; the response reports what can be verified.
 
 import { centralStatus } from './identity.ts';
+import { sanitizeFileName, storeRequestBodyAsFile } from './files.ts';
 
 type Env = App.Platform['env'] & Record<string, unknown>;
 
@@ -33,6 +34,10 @@ const FROZEN_TEXT = 'Your account is frozen pending review. Unfreeze at https://
 const STATUS_UNKNOWN_TEXT = 'Southbag Identity is unavailable, so your account status cannot be checked. Try again shortly.';
 
 type Json = Record<string, unknown>;
+
+// Caller-fixable input problems: rejected BEFORE any fee moves (see preflightToolCall), never
+// charged, and distinct from unknown-outcome failures.
+class ToolInputError extends Error {}
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
 const rpcResult = (id: unknown, result: unknown) => ({ jsonrpc: '2.0', id, result });
@@ -107,6 +112,19 @@ function toolList() {
 			inputSchema: { type: 'object', properties: {} }
 		},
 		{
+			name: 'upload_text_file',
+			title: 'Upload a text file',
+			description: `Stores a UTF-8 text file in the token owner's Drive. Drive has no action fees (quota-based); only the ${money(MCP_REQUEST_FEE_CENTS)} MCP request fee applies. Standard quota limits are enforced. Binary files are not exposed to agents.`,
+			inputSchema: {
+				type: 'object',
+				properties: {
+					name: { type: 'string', description: 'File name' },
+					content: { type: 'string', description: 'UTF-8 text content' }
+				},
+				required: ['name', 'content']
+			}
+		},
+		{
 			name: 'get_storage',
 			title: 'Get storage usage',
 			description: `File count and total bytes stored. Costs the ${money(MCP_REQUEST_FEE_CENTS)} MCP request fee; no additional action fee.`,
@@ -129,7 +147,28 @@ function initializeResult() {
 	};
 }
 
-async function runDriveTool(env: Env, user: AgentIdentity['user'], name: string): Promise<{ text: string; data: Json }> {
+async function runDriveTool(env: Env, user: AgentIdentity['user'], name: string, args: Json): Promise<{ text: string; data: Json }> {
+	if (name === 'upload_text_file') {
+		const name = sanitizeFileName(String(args.name ?? ''));
+		const content = String(args.content ?? '');
+		const bytes = new TextEncoder().encode(content);
+		// The same storeRequestBodyAsFile the web upload uses: quota, size and storage handling in
+		// one place (src/lib/server/files.ts).
+		const stored = await storeRequestBodyAsFile(env.DB, {
+			userId: user.id,
+			name,
+			contentType: 'text/plain; charset=utf-8',
+			body: new Response(bytes).body,
+			declaredLength: bytes.length,
+			allowEmpty: true
+		});
+		if (!stored.ok) {
+			const why = { storage_full: 'Storage quota reached.', too_large: 'File too large for the quota.', size_mismatch: 'Upload size mismatch.', storage_error: 'Storage failed.', empty_file: 'Empty file.' }[stored.error];
+			// The store failed BEFORE anything persisted: a known, safe outcome, answered normally.
+			return { text: `${why} Only the request fee was charged.`, data: { failed: stored.error } };
+		}
+		return { text: `Uploaded ${stored.name} (${stored.size} bytes).`, data: { file: { id: stored.id, name: stored.name, size: stored.size } } };
+	}
 	if (name === 'list_files') {
 		const { results } = await env.DB.prepare(
 			'SELECT id, name, size, content_type, created_at FROM files WHERE user_id = ? ORDER BY created_at DESC LIMIT 50')
@@ -141,6 +180,17 @@ async function runDriveTool(env: Env, user: AgentIdentity['user'], name: string)
 	const row = await env.DB.prepare('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM files WHERE user_id = ?')
 		.bind(user.id).first<{ files: number; bytes: number }>();
 	return { text: `${row?.files ?? 0} files, ${row?.bytes ?? 0} bytes.`, data: { files: row?.files ?? 0, bytes: row?.bytes ?? 0 } };
+}
+
+// Validation BEFORE fees: argument shape and basic limits are checked here, before the journal
+// claim and before any fee moves. A malformed call is a free rejection - the request fee only
+// ever pays for an action actually attempted.
+function preflightDriveTool(name: string, args: Json): void {
+	if (name === 'upload_text_file') {
+		if (typeof args.name !== 'string' || !args.name.trim()) throw new ToolInputError('upload_text_file needs a file name.');
+		if (typeof args.content !== 'string') throw new ToolInputError('upload_text_file needs text content.');
+		if (new TextEncoder().encode(args.content).length > 50 * 1024 * 1024) throw new ToolInputError('File too large for the Drive quota.');
+	}
 }
 
 // A 'pending' journal row means a previous call with this key did not finish cleanly. It is NEVER
@@ -174,6 +224,15 @@ async function handleToolsCall(request: Request, env: Env, message: { id: unknow
 		if (stored.structuredContent?.receipt) stored.structuredContent.receipt.duplicate = true;
 		return json(rpcResult(message.id, stored));
 	};
+
+	const args = (message.params?.arguments ?? {}) as Json;
+	try {
+		preflightDriveTool(name, args);
+	} catch (error) {
+		if (error instanceof ToolInputError)
+			return json(rpcResult(message.id, { content: [{ type: 'text', text: `${error.message} No fees charged.` }], isError: true, structuredContent: { rejected: 'invalid_input' } }));
+		throw error;
+	}
 
 	const existing = await db.prepare('SELECT tool, args_hash, status, response FROM mcp_call WHERE idempotency_key = ?').bind(rowKey).first<{ tool: string; args_hash: string; status: string; response: string | null }>();
 	if (existing) {
@@ -212,7 +271,7 @@ async function handleToolsCall(request: Request, env: Env, message: { id: unknow
 
 	let result: Json;
 	try {
-		const { text, data } = await runDriveTool(env, auth.user, name);
+		const { text, data } = await runDriveTool(env, auth.user, name, args);
 		result = {
 			content: [{ type: 'text', text }],
 			isError: false,
