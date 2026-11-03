@@ -164,7 +164,7 @@ test('upload_text_file stores via the shared path, charges only the $1 request f
   // A retry replays: no second file, no second charge.
   const res2 = await handleMcp(post(rpc(2, 'tools/call', { name: 'upload_text_file', arguments: { name: 'notes.txt', content: 'Kevin was here.' } }), { ...auth, ...key }), env);
   assert.equal((await res2.json()).result.structuredContent.receipt.duplicate, true);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM files').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM files').get().n, 2); // seeded f1 + the upload
   assert.equal(charges.length, 1);
   restore();
 });
