@@ -14,6 +14,10 @@ declare global {
 				ORIGIN: string;
 				IDENTITY_ISSUER: string;
 				OFFICE_ORIGIN: string;
+				IDENTITY_INTERNAL_SECRET?: string;
+				BANKING?: {
+					charge(input: Record<string, unknown>): Promise<{ balance: number | null; opened: boolean; duplicate?: boolean }>;
+				};
 			};
 			// `context` (with waitUntil) is contributed by adapter-cloudflare.
 		}
