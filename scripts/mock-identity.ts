@@ -49,11 +49,17 @@ Bun.serve({
 				authorization_endpoint: `${ISSUER}/authorize`,
 				token_endpoint: `${ISSUER}/token`,
 				userinfo_endpoint: `${ISSUER}/userinfo`,
+				registration_endpoint: `${ISSUER}/register`,
 				end_session_endpoint: `${ISSUER}/end-session`,
 				jwks_uri: `${ISSUER}/jwks`,
 				response_types_supported: ['code'],
 				code_challenge_methods_supported: ['S256']
 			});
+		}
+
+		if (url.pathname === '/register' && req.method === 'POST') {
+			// Dynamic registration, minus the dynamics: everyone gets the fixed client.
+			return json({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET }, 201);
 		}
 
 		if (url.pathname === '/authorize') {

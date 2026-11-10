@@ -19,6 +19,7 @@ emptiness. Every account receives exactly **71.1 floppy disks (100MB)**. Kevin i
   concurrent uploads can't squeeze past the limit (the loser's blob is deleted)
 - Download, rename, delete, and public share links
 - **WebDAV** at `/webdav/` (Class 1+2, Basic auth with an access token from the files page)
+- **Native-client API auth** — `/api/*` also accepts an Identity access token as a Bearer token (validated fresh against userinfo, fail closed), which is how Southbag Browser on Southbag OS sends downloads straight to Drive
 - Sorting (Shuffled is the default and the recommendation) and case-sensitive search
 - **Southbag Office™ storage** — every Office document lives here as an encrypted
   `.southbag*` file, counted against your 71.1 floppies (see below)

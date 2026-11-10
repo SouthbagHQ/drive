@@ -2,42 +2,13 @@
 // paths, so identity's exact route layout stays the canonical source of truth.
 
 import { hostPrefixed } from './session';
+import { getMetadata } from './identity-metadata';
 
-interface OidcMetadata {
-	issuer: string;
-	authorization_endpoint: string;
-	token_endpoint: string;
-	userinfo_endpoint: string;
-	registration_endpoint: string;
-	end_session_endpoint?: string;
-}
 
 type Env = App.Platform['env'];
 
 // Cookie holding the in-flight authorization state + PKCE verifier.
 export const OIDC_COOKIE = hostPrefixed('sb_oidc');
-
-const metadataCache = new Map<string, Promise<OidcMetadata>>();
-
-function validateMetadata(issuer: string, meta: OidcMetadata): OidcMetadata {
-	// A 2xx response that parses as JSON is not necessarily valid discovery.
-	// Reject a malformed doc so a partial/proxied response can't be cached for
-	// the isolate's lifetime and brick every login with `new URL(undefined)`.
-	if (meta.issuer !== issuer) {
-		throw new Error(`OIDC issuer mismatch: expected ${issuer}, got ${meta.issuer}`);
-	}
-	for (const key of [
-		'authorization_endpoint',
-		'token_endpoint',
-		'userinfo_endpoint',
-		'registration_endpoint'
-	] as const) {
-		if (typeof meta[key] !== 'string' || !meta[key]) {
-			throw new Error(`OIDC metadata missing ${key}`);
-		}
-	}
-	return meta;
-}
 
 async function getClientId(env: Env): Promise<string> {
 	const existing = await env.DB.prepare(
@@ -99,22 +70,6 @@ async function getClientId(env: Env): Promise<string> {
 	}
 }
 
-function getMetadata(issuer: string): Promise<OidcMetadata> {
-	let cached = metadataCache.get(issuer);
-	if (!cached) {
-		cached = fetch(`${issuer}/.well-known/openid-configuration`)
-			.then(async (res) => {
-				if (!res.ok) throw new Error(`Failed to fetch identity OIDC metadata: ${res.status}`);
-				return validateMetadata(issuer, (await res.json()) as OidcMetadata);
-			})
-			.catch((err) => {
-				metadataCache.delete(issuer); // allow retry on next call
-				throw err;
-			});
-		metadataCache.set(issuer, cached);
-	}
-	return cached;
-}
 
 export async function endSessionUrl(env: Env, idTokenHint?: string): Promise<string | null> {
 	const { end_session_endpoint } = await getMetadata(env.IDENTITY_ISSUER);
