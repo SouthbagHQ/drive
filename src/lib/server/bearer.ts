@@ -38,8 +38,11 @@ export async function authenticateBearer(
 		const res = await fetch(userinfo_endpoint, {
 			headers: { authorization: `Bearer ${token}` }
 		});
-		// A definite answer of "no" is an invalid token, not an outage.
-		if (res.status === 401 || res.status === 403) return { ok: false, reason: 'invalid_token' };
+		// A definite answer of "no" is an invalid token, not an outage. Real
+		// Identity (better-auth) answers 400 invalid_request for bad, expired or
+		// revoked tokens rather than 401, so ANY 4xx counts as "no"; only 5xx
+		// and network failures mean Identity itself is unavailable.
+		if (res.status >= 400 && res.status < 500) return { ok: false, reason: 'invalid_token' };
 		if (!res.ok) throw new Error(`userinfo ${res.status}`);
 		info = (await res.json()) as typeof info;
 		if (typeof info.sub !== 'string' || !info.sub) throw new Error('userinfo missing sub');
