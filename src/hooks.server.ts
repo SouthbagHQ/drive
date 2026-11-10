@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { SESSION_COOKIE, loadSessionUser } from '$lib/server/session';
+import { authenticateBearer } from '$lib/server/bearer';
 import { authenticateWebdav } from '$lib/server/webdav-auth';
 import { isWebdavPath } from '$lib/server/webdav-util';
 import { centralStatus, frozenResponse, FROZEN_TEXT, STATUS_UNKNOWN_TEXT } from '$lib/server/identity';
@@ -24,6 +25,30 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// are present so the browser listing at /webdav/ works after login.
 	if (!event.locals.user && db && isWebdavPath(event.url.pathname)) {
 		event.locals.user = await authenticateWebdav(db, event.request.headers.get('authorization'));
+	}
+
+	// Native clients (Southbag Browser on Southbag OS) hold an Identity access
+	// token instead of a cookie session and present it as a bearer token on the
+	// API. Validated fresh against Identity; fail closed when Identity is down.
+	if (
+		!event.locals.user &&
+		db &&
+		event.platform?.env &&
+		event.url.pathname.startsWith('/api/') &&
+		event.request.headers.get('authorization')
+	) {
+		const bearer = await authenticateBearer(
+			event.platform.env,
+			event.request.headers.get('authorization')
+		);
+		if (bearer.ok) {
+			event.locals.user = bearer.user;
+		} else if (bearer.reason === 'identity_unavailable') {
+			return new Response(
+				'Southbag Identity is unavailable, so your sign-in cannot be checked. Try again shortly.',
+				{ status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } }
+			);
+		}
 	}
 
 	// The account-level freeze covers everything a signed-in user can do, reads included -
