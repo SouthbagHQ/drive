@@ -123,6 +123,23 @@ test('Identity saying 401 means invalid token, not an outage', async () => {
 	}
 });
 
+test('a userinfo 400 (better-auth invalid_request) means invalid token, not an outage', async () => {
+	const { env, restore } = setup({
+		userinfo: () =>
+			new Response(JSON.stringify({ error: 'invalid_request', error_description: 'Invalid access token' }), {
+				status: 400
+			})
+	});
+	try {
+		assert.deepEqual(await authenticateBearer(env, 'Bearer expired-token'), {
+			ok: false,
+			reason: 'invalid_token'
+		});
+	} finally {
+		restore();
+	}
+});
+
 test('Identity unreachable fails closed as unavailable', async () => {
 	const { env, restore } = setup({
 		userinfo: () => {
